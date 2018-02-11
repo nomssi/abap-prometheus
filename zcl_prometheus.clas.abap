@@ -114,29 +114,23 @@ CLASS ZCL_PROMETHEUS IMPLEMENTATION.
   METHOD update_or_append.
     TRY.
         DATA(key) = to_lower( i_modify_record-key ).
+        DATA(value) = condense( i_modify_record-value ).
 
-        IF line_exists( c_data[ key = key ] ).
-          FIELD-SYMBOLS <current_value> TYPE string.
+        ASSIGN c_data[ key = key ] TO FIELD-SYMBOL(<record>).
+        IF sy-subrc EQ 0.  " line exists
 
-          ASSIGN c_data[ key = key ]-value TO <current_value>.
-          CASE i_modify_record-command.
-            WHEN zif_prometheus=>c_command-increment.
-              <current_value> = <current_value> + i_modify_record-value.
+          IF i_modify_record-command EQ zif_prometheus=>c_command-increment.
+            value = <record>-value + value.
+            value = condense( value ).
+          ENDIF.
 
-            WHEN OTHERS.
-              <current_value> = i_modify_record-value.
-          ENDCASE.
-
-          <current_value> = condense( <current_value> ).
+          <record>-value = value.
         ELSE.
 
-          CASE i_modify_record-command.
-            WHEN zif_prometheus=>c_command-increment.
-              APPEND VALUE #( key = key value = '1' ) TO c_data.
-
-            WHEN OTHERS.
-              APPEND VALUE #( key = key value = condense( i_modify_record-value ) ) TO c_data.
-          ENDCASE.
+          APPEND VALUE #( key = key
+                          value = SWITCH #( i_modify_record-command
+                                       WHEN zif_prometheus=>c_command-increment THEN '1'
+                                       ELSE value )  ) TO c_data.
           SORT c_data BY key.
         ENDIF.
 
@@ -161,9 +155,8 @@ CLASS ZCL_PROMETHEUS IMPLEMENTATION.
 
 
   METHOD zif_prometheus~get_metric_string.
-    LOOP AT read_all( ) ASSIGNING FIELD-SYMBOL(<record>).
-      r_result = r_result && |{ <record>-key } { <record>-value }\r\n|.
-    ENDLOOP.
+    r_result = REDUCE #( INIT res TYPE string FOR record IN read_all( )
+                         NEXT res = res && |{ record-key } { record-value }\r\n| ).
   ENDMETHOD.
 
 
@@ -175,9 +168,9 @@ CLASS ZCL_PROMETHEUS IMPLEMENTATION.
 
 
   METHOD zif_prometheus~read_single.
+    DATA(shr_area) = attach_for_read( ).
     DATA(key) = to_lower( i_key ).
 
-    DATA(shr_area) = attach_for_read( ).
     IF line_exists( shr_area->root->data[ key = key ] ).
       r_result = shr_area->root->data[ key = key ]-value.
     ENDIF.
